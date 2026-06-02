@@ -1,0 +1,18 @@
+# Core
+numpy>=1.24
+pyyaml>=6.0
+opencv-python>=4.8
+pillow>=10.0
+tqdm>=4.66
+
+# COCO labels / masks
+pycocotools>=2.0.7
+
+# Downstream detector/segmenter
+ultralytics>=8.2
+
+# NOTE: the heavy GPU stacks are installed by env/setup.sh, not pinned here,
+# because they need CUDA-matched wheels:
+#   - torch / torchvision        (CUDA build for your driver)
+#   - nerfstudio + gsplat        (3DGS reconstruction + rendering)
+#   - sam2 (segment-anything-2)  (seed masks)

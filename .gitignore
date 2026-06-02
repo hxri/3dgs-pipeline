@@ -1,0 +1,21 @@
+# data + heavy artifacts
+data/
+checkpoints/
+outputs/
+*.ply
+*.pt
+*.pth
+*.ckpt
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/

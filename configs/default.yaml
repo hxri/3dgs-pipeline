@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 3dgs-data-engine pipeline config.
+# Every stage reads this file + a SCENE name and writes to data/<scene>/<stage>/.
+# Override the scene per-run with:  SCENE=room_b bash scripts/00_frames.sh
+# ─────────────────────────────────────────────────────────────────────────────
+
+project:
+  scene: room_a            # default scene if SCENE env var is unset
+
+paths:
+  data_root: data          # data/<scene>/{frames,colmap,splat,labels,render,models,eval}
+
+hardware:
+  recon_gpu: 0             # reconstruction + render farm
+  train_gpu: 1             # downstream detector
+
+# 00 — frame extraction -------------------------------------------------------
+frames:
+  video_glob: "raw/*.mp4"  # relative to data/<scene>/ ; also matches a folder of images
+  fps: 2                   # frames per second to sample from video
+  max_frames: 300          # hard cap (3DGS rarely needs more for one room)
+  resize_long_edge: 1600   # downscale long edge before COLMAP (0 = keep native)
+
+# 01 — camera poses (COLMAP) --------------------------------------------------
+poses:
+  backend: ns-process-data # ns-process-data | colmap   (ns wraps colmap nicely)
+  matcher: vocab_tree      # exhaustive | sequential | vocab_tree
+  camera_model: OPENCV
+
+# 02 — 3DGS reconstruction ----------------------------------------------------
+reconstruct:
+  method: splatfacto       # nerfstudio method
+  max_num_iterations: 30000
+  export_ply: true         # ns-export gaussian-splat after training
+
+# 03 — labeling ---------------------------------------------------------------
+label:
+  # The categories you care about. Order defines class ids (0-indexed).
+  classes: [chair, monitor, keyboard, mouse, mug, book, laptop, plant, bottle, backpack]
+  sam2_checkpoint: checkpoints/sam2.1_hiera_large.pt
+  sam2_config: configs/sam2.1/sam2.1_hiera_l.yaml
+  seed_stride: 20          # run SAM2 on every Nth input frame to seed instances
+  min_mask_area: 400       # drop tiny masks (pixels)
+
+# 04 — render data engine -----------------------------------------------------
+render:
+  num_views: 5000
+  trajectory: orbit        # orbit | spiral | hemisphere | jitter_input
+  image_size: [960, 540]   # [W, H]
+  radius_scale: 1.0        # multiply scene radius for orbit distance
+  elevation_deg: [-10, 35] # min/max camera elevation for sampled views
+  min_visible_instances: 1 # skip frames where nothing labeled is in view
+  export_format: coco      # coco (instances.json) — consumed by stage 05
+
+# 05 — train downstream model -------------------------------------------------
+train:
+  model: yolov8s-seg.pt    # ultralytics seg checkpoint to fine-tune
+  epochs: 50
+  imgsz: 960
+  batch: 16
+  val_split: 0.1           # held-out split of the SYNTHETIC data for sanity
+
+# 06 — evaluate on REAL held-out frames ---------------------------------------
+eval:
+  # Point these at hand-labeled real frames (the honest test).
+  real_images: eval/real/images        # relative to data/<scene>/
+  real_annotations: eval/real/instances.json
+  metric: coco             # coco mAP via pycocotools
