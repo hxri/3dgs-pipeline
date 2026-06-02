@@ -39,8 +39,18 @@ label:
   classes: [chair, monitor, keyboard, mouse, mug, book, laptop, plant, bottle, backpack]
   sam2_checkpoint: checkpoints/sam2.1_hiera_large.pt
   sam2_config: configs/sam2.1/sam2.1_hiera_l.yaml
-  seed_stride: 20          # run SAM2 on every Nth input frame to seed instances
-  min_mask_area: 400       # drop tiny masks (pixels)
+  seed_stride: 20          # run SAM2 on every Nth training view to seed labels
+  min_mask_area: 400       # drop tiny SAM2 masks (pixels)
+  clip:                    # zero-shot class assignment for each SAM2 mask
+    model: ViT-B-32
+    pretrained: laion2b_s34b_b79k
+    score_threshold: 0.28  # min softmax prob to accept a class (else background)
+  vote:
+    min_votes: 3           # min seeded-view votes before a gaussian gets a class
+  instance:                # split each class into instances by 3D clustering
+    dbscan_eps_scale: 0.02 # eps = scale * scene_radius
+    dbscan_min_samples: 50
+    max_points_per_class: 200000  # subsample before DBSCAN, then nearest-assign rest
 
 # 04 — render data engine -----------------------------------------------------
 render:
@@ -50,6 +60,7 @@ render:
   radius_scale: 1.0        # multiply scene radius for orbit distance
   elevation_deg: [-10, 35] # min/max camera elevation for sampled views
   min_visible_instances: 1 # skip frames where nothing labeled is in view
+  instance_alpha_thresh: 0.5  # min per-pixel instance coverage to count as that instance
   export_format: coco      # coco (instances.json) — consumed by stage 05
 
 # 05 — train downstream model -------------------------------------------------

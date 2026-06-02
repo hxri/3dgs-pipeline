@@ -50,15 +50,24 @@ SCENE=room_a bash scripts/run_all.sh
 
 | Stage | Script | Status |
 |-------|--------|--------|
-| 00 frames      | `00_frames.sh`      | ✅ working (ffmpeg) |
-| 01 poses       | `01_poses.sh`       | ✅ working (wraps `ns-process-data` / COLMAP) |
-| 02 reconstruct | `02_reconstruct.sh` | ✅ working (wraps `ns-train splatfacto`) |
-| 03 label       | `03_label.sh`       | 🟡 scaffold — SAM2 seed masks done, 3D lift is a TODO |
-| 04 render      | `04_render.sh`      | 🟡 scaffold — trajectories + COCO export done, render forward is a TODO |
-| 05 train       | `05_train.sh`       | ✅ working (wraps Ultralytics YOLO-seg) |
-| 06 eval        | `06_eval.sh`        | ✅ working (Ultralytics val / pycocotools) |
+| 00 frames      | `00_frames.sh`      | ✅ ffmpeg frame extraction |
+| 01 poses       | `01_poses.sh`       | ✅ wraps `ns-process-data` / COLMAP |
+| 02 reconstruct | `02_reconstruct.sh` | ✅ wraps `ns-train splatfacto` |
+| 03 label       | `03_label.sh`       | ✅ SAM2 + CLIP seeding → geometric voting → DBSCAN instances |
+| 04 render      | `04_render.sh`      | ✅ gsplat instance-aware render → COCO |
+| 05 train       | `05_train.sh`       | ✅ wraps Ultralytics YOLO-seg |
+| 06 eval        | `06_eval.sh`        | ✅ Ultralytics val / pycocotools |
 
-The two 🟡 stages are where the real research is — see `docs/THE_HARD_PART.md`.
+Plus a QA step (run it after stage 04, before training):
+
+```bash
+SCENE=room_a bash scripts/qa.sh 40   # overlays -> data/<scene>/render/qa/
+```
+
+All seven stages are implemented end-to-end. The GPU stages (02–04) were written against
+the nerfstudio / gsplat / SAM2 APIs but need a real GPU + capture to validate — see
+`docs/THE_HARD_PART.md` for the design and the known approximations (occlusion in voting,
+scene `up` assumption, etc.).
 
 ## Hardware
 

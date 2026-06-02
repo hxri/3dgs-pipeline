@@ -29,8 +29,9 @@ pip install -r requirements.txt
 echo "==> Nerfstudio + gsplat (3DGS reconstruction & rendering)"
 pip install nerfstudio        # pulls a compatible gsplat
 
-echo "==> SAM2 (seed masks)"
+echo "==> SAM2 (seed masks) + open_clip (class assignment)"
 pip install "git+https://github.com/facebookresearch/sam2.git"
+pip install open_clip_torch
 mkdir -p checkpoints
 echo "    Download a SAM2 checkpoint into ./checkpoints, e.g.:"
 echo "    wget -P checkpoints https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"

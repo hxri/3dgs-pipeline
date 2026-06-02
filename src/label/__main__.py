@@ -1,108 +1,103 @@
 """Stage 03 — derive 3D instance labels once, so every rendered view gets free masks.
 
-Two sub-steps:
-  (a) SEED  — run SAM2 on a strided subset of input frames to get 2D instance masks.
-              [implemented as a scaffold: wires up SAM2 + saves masks; fill the model call]
-  (b) LIFT  — assign a persistent instance id to each Gaussian by back-projecting the
-              seed masks into the 3D scene and voting.
-              [TODO: the real research step — see docs/THE_HARD_PART.md]
+Pipeline:
+  (a) SEED  — SAM2 automatic masks + CLIP class assignment on strided training views.
+  (b) VOTE  — project Gaussians into seeded views, tally class votes (geometric lift).
+  (c) SPLIT — cluster each class spatially (DBSCAN) into instances.
 
-Output: labels/instances/  (per-Gaussian instance id + {instance_id -> class_id} table)
-which the render stage reads to produce per-view masks.
-
-This file is intentionally a runnable scaffold: it validates inputs, sets up the
-directory contract the render stage expects, and raises a clear NotImplementedError
-at the exact spot you need to implement, rather than failing mysteriously.
+Loads the trained splatfacto scene so Gaussians and cameras share one coordinate frame.
+GPU required. See docs/THE_HARD_PART.md for the design rationale.
 """
 from __future__ import annotations
 
 import json
-from pathlib import Path
+
+import numpy as np
 
 from src.common.cli import common_parser, setup
-
-
-def seed_masks_with_sam2(frames, lc, out_dir, log):
-    """Run SAM2 over strided input frames -> 2D instance masks + class guesses.
-
-    Returns the directory of saved seed masks. Filling in the model call is the
-    only TODO here; the I/O contract below is what `lift` consumes.
-    """
-    try:
-        import torch  # noqa: F401
-        from sam2.build_sam import build_sam2  # noqa: F401
-        from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: F401
-    except ImportError as e:
-        raise SystemExit(
-            "SAM2 not installed. `pip install "
-            "git+https://github.com/facebookresearch/sam2.git` and download a "
-            f"checkpoint to {lc['sam2_checkpoint']}.\n(import error: {e})"
-        )
-
-    ckpt = Path(lc["sam2_checkpoint"])
-    if not ckpt.exists():
-        raise SystemExit(f"SAM2 checkpoint missing: {ckpt} (see env/setup.sh)")
-
-    seed_frames = frames[:: max(1, lc["seed_stride"])]
-    log.info("SAM2 seeding on %d / %d frames", len(seed_frames), len(frames))
-
-    # ------------------------------------------------------------------ TODO
-    # 1. predictor = SAM2ImagePredictor(build_sam2(lc["sam2_config"], str(ckpt)))
-    # 2. For each seed frame: get masks (automatic mask gen OR prompts), then
-    #    assign a class id per mask using your category list lc["classes"]
-    #    (e.g. CLIP/text-grounding, or manual prompts for the prototype).
-    # 3. Track identities across frames (SAM2 video propagation) so the same
-    #    physical object keeps one id — this is what makes the 3D lift clean.
-    # 4. Save each mask as out_dir/<frame_stem>/<instance_id>.png plus a
-    #    out_dir/seed_meta.json: {frame: {instance_id: class_id}}.
-    # ----------------------------------------------------------------------
-    raise NotImplementedError(
-        "Implement SAM2 seed-mask generation here. The render stage only needs the "
-        "directory contract documented above; everything downstream is wired."
-    )
-
-
-def lift_masks_to_3d(paths, seed_dir, lc, log):
-    """Back-project 2D seed masks into the 3DGS scene and vote a per-Gaussian id.
-
-    Output contract (consumed by stage 04 render):
-        labels/instances/gaussian_instance_ids.npy   int array, len = #gaussians
-        labels/instances/instance_classes.json       {instance_id: class_id}
-    """
-    # ------------------------------------------------------------------ TODO
-    # Two viable approaches (pick one for the prototype):
-    #  A) Feature-field: add a per-Gaussian instance embedding and optimize it so
-    #     rendered instance maps match the seed masks (Gaussian Grouping / SAGA).
-    #  B) Geometric vote: for each Gaussian, project its center into every seed
-    #     view; the instance whose mask covers it most often wins. Cheaper, no
-    #     retraining — a great first cut.
-    # See docs/THE_HARD_PART.md for the tradeoffs.
-    # ----------------------------------------------------------------------
-    raise NotImplementedError(
-        "Implement 3D lifting (Gaussian Grouping / SAGA, or geometric voting)."
-    )
+from src.common import nerfstudio_io as nio
+from src.label.lift import assign_classes, cluster_instances, vote_classes
+from src.label.sam2_seed import build_amg, ClipClassifier, seed_label_map
 
 
 def main():
     args = common_parser("Stage 03: 3D instance labeling").parse_args()
     cfg, paths, log = setup(args)
     lc = cfg["label"]
+    classes = lc["classes"]
+    num_classes = len(classes)
 
-    frames = sorted(paths.frames.glob("frame_*.jpg"))
-    if not frames:
-        raise SystemExit(f"No frames in {paths.frames} — run stage 00 first")
+    import cv2
+    import torch
 
-    inst_dir = paths.labels / "instances"
-    inst_dir.mkdir(parents=True, exist_ok=True)
-    # persist the class list so render/train agree on ids without re-reading config
-    (paths.labels / "classes.json").write_text(json.dumps(lc["classes"]))
+    # ── load the trained scene (gaussians + cameras in one frame) ────────────
+    config_path = nio.resolve_latest_config(paths.splat)
+    log.info("Loading scene: %s", config_path)
+    _, pipeline = nio.load_pipeline(config_path)
+    model = pipeline.model
+    means, *_ = nio.activated_gaussians(model)
+    device = means.device
+    center, radius = nio.scene_bounds(means)
+    log.info("scene: %d gaussians, radius=%.3f", means.shape[0], radius)
 
+    cams, image_paths, filenames = nio.get_train_cameras(pipeline)
+    n_cams = len(image_paths)
+
+    # ── (a) SEED on a strided subset of training views ───────────────────────
+    amg = build_amg(lc, device)
+    clip = ClipClassifier(lc["clip"], classes, device)
     seed_dir = paths.labels / "seed"
     seed_dir.mkdir(parents=True, exist_ok=True)
-    seed_masks_with_sam2(frames, lc, seed_dir, log)   # raises NotImplementedError (scaffold)
-    lift_masks_to_3d(paths, seed_dir, lc, log)        # raises NotImplementedError (scaffold)
 
-    log.info("✅ labels -> %s", inst_dir)
+    stride = max(1, int(lc["seed_stride"]))
+    seed_idxs = list(range(0, n_cams, stride))
+    log.info("SAM2+CLIP seeding %d/%d views (stride %d)", len(seed_idxs), n_cams, stride)
+
+    seeds = []
+    for k, ci in enumerate(seed_idxs):
+        img_bgr = cv2.imread(image_paths[ci])
+        if img_bgr is None:
+            log.warning("could not read %s, skipping", image_paths[ci])
+            continue
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        label_map = seed_label_map(img_rgb, amg, clip)
+        np.save(seed_dir / f"{filenames[ci]}.npy", label_map)
+        fx, fy, cx, cy, W, H = nio.intrinsics(cams, ci)
+        c2w = torch.tensor(nio.camera_to_world_4x4(cams, ci), dtype=torch.float32, device=device)
+        lm = torch.tensor(label_map, dtype=torch.long, device=device)
+        seeds.append((lm, fx, fy, cx, cy, W, H, c2w))
+        if (k + 1) % 10 == 0:
+            log.info("  seeded %d/%d (last: %d labeled px)",
+                     k + 1, len(seed_idxs), int((label_map > 0).sum()))
+
+    if not seeds:
+        raise SystemExit("No seed masks produced — check SAM2 checkpoint / images.")
+
+    # ── (b) VOTE: lift 2D semantics onto Gaussians ───────────────────────────
+    log.info("Voting classes onto %d gaussians across %d views", means.shape[0], len(seeds))
+    votes = vote_classes(means, seeds, num_classes, device, log)
+    class_ids = assign_classes(votes, int(lc["vote"]["min_votes"]))
+    labeled = int((class_ids > 0).sum())
+    log.info("labeled %d/%d gaussians (%.1f%%)", labeled, means.shape[0],
+             100.0 * labeled / means.shape[0])
+
+    # ── (c) SPLIT classes into instances by 3D clustering ────────────────────
+    ic = lc["instance"]
+    eps = float(ic["dbscan_eps_scale"]) * radius
+    log.info("Clustering instances (DBSCAN eps=%.4f, min_samples=%d)", eps, ic["dbscan_min_samples"])
+    inst_ids, inst_classes = cluster_instances(
+        means.detach().cpu().numpy(), class_ids.detach().cpu().numpy(),
+        num_classes, eps, int(ic["dbscan_min_samples"]), int(ic["max_points_per_class"]), log)
+    log.info("found %d instances", len(inst_classes))
+
+    # ── save the output contract ─────────────────────────────────────────────
+    out = paths.labels / "instances"
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / "gaussian_instance_ids.npy", inst_ids)
+    (out / "instance_classes.json").write_text(
+        json.dumps({str(k): v for k, v in inst_classes.items()}))
+    (paths.labels / "classes.json").write_text(json.dumps(classes))
+    log.info("✅ labels -> %s  (%d instances over %d classes)", out, len(inst_classes), num_classes)
 
 
 if __name__ == "__main__":
