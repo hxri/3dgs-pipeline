@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Transparent COLMAP -> Docker shim.
+#
+# Installed on your PATH as `colmap`, this makes the official COLMAP container look
+# like a native `colmap` binary, so nerfstudio's `ns-process-data` and this repo's
+# raw-COLMAP backend work unchanged — they just call `colmap <args>`.
+#
+# Install:  env/setup.sh with COLMAP_DOCKER=1   (or copy this to ~/.local/bin/colmap)
+#
+# Key trick: the current dir is bind-mounted at the SAME path inside the container
+# (-v "$PWD:$PWD" -w "$PWD"), so every relative/absolute path the pipeline passes
+# resolves identically in the container. GPUs are exposed for CUDA feature matching.
+#
+# Override at runtime via env:
+#   COLMAP_IMAGE        docker image/tag        (default: colmap/colmap:latest)
+#   COLMAP_DOCKER_GPUS  --gpus value            (default: all; e.g. '"device=0"')
+set -euo pipefail
+
+IMAGE="${COLMAP_IMAGE:-colmap/colmap:latest}"
+GPUS="${COLMAP_DOCKER_GPUS:-all}"
+
+exec docker run --gpus "$GPUS" --rm \
+  -u "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
+  -e QT_QPA_PLATFORM=offscreen \
+  -w "$PWD" -v "$PWD:$PWD" \
+  --entrypoint colmap \
+  "$IMAGE" "$@"

@@ -32,8 +32,9 @@ Stages read one config (`configs/default.yaml`) and a `SCENE` name, and write in
 ```bash
 # 0. one-time environment setup (uv venv + gsplat + sam2 + ultralytics)
 #    (install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh)
-#    (COLMAP + ffmpeg are native deps — apt/brew install them; setup.sh checks)
-bash env/setup.sh
+#    ffmpeg is native (apt/brew). COLMAP: native, OR Docker (see below).
+bash env/setup.sh                    # native COLMAP
+# COLMAP_DOCKER=1 bash env/setup.sh  # use COLMAP from Docker instead
 source .venv/bin/activate            # the stage scripts also auto-activate it
 
 # 1. drop a capture in place
@@ -47,6 +48,32 @@ SCENE=room_a bash scripts/02_reconstruct.sh
 # ... or run the whole thing
 SCENE=room_a bash scripts/run_all.sh
 ```
+
+## COLMAP via Docker (no native install)
+
+Stage 01 shells out to a `colmap` binary on `PATH` (directly and via nerfstudio's
+`ns-process-data`). If you'd rather not install COLMAP natively, run setup with
+`COLMAP_DOCKER=1` — it installs `env/colmap-docker` as `~/.local/bin/colmap`, a thin
+shim that forwards to the official container:
+
+```bash
+COLMAP_DOCKER=1 bash env/setup.sh
+# ensure the shim is reachable (setup.sh warns if not):
+export PATH="$HOME/.local/bin:$PATH"
+docker pull colmap/colmap:latest          # optional; first use pulls it anyway
+```
+
+The shim bind-mounts the current dir at the same path inside the container
+(`-v "$PWD:$PWD" -w "$PWD"`) so every path the pipeline passes resolves identically, and
+exposes your GPUs (`--gpus all`) for CUDA feature matching. Nothing else changes — stages
+01/02 run exactly as documented. Override the image or GPUs per run:
+
+```bash
+COLMAP_IMAGE=colmap/colmap:20240625 SCENE=room_a bash scripts/01_poses.sh
+COLMAP_DOCKER_GPUS='"device=0"'     SCENE=room_a bash scripts/01_poses.sh
+```
+
+Requires Docker + the `nvidia-container-toolkit`. `ffmpeg` (stage 00) stays native.
 
 ## Status of each stage
 

@@ -23,16 +23,32 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── native binaries (uv can't install these) ─────────────────────────────────
-missing=()
-command -v colmap  >/dev/null 2>&1 || missing+=(colmap)
-command -v ffmpeg  >/dev/null 2>&1 || missing+=(ffmpeg)
-if [ "${#missing[@]}" -gt 0 ]; then
-  echo "==> Missing native deps: ${missing[*]}"
-  echo "    Linux:  sudo apt-get install -y colmap ffmpeg"
-  echo "    macOS:  brew install colmap ffmpeg"
-  echo "    (COLMAP needs a CUDA-enabled build for fast feature matching on GPU.)"
-  echo "    Install them, then re-run this script."
+# ── COLMAP: native binary, or a Docker shim (COLMAP_DOCKER=1) ─────────────────
+if [[ "${COLMAP_DOCKER:-0}" == "1" ]]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "==> COLMAP_DOCKER=1 but docker not found. Install Docker (+ nvidia-container-toolkit)."
+    exit 1
+  fi
+  BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+  mkdir -p "$BIN_DIR"
+  install -m 0755 env/colmap-docker "$BIN_DIR/colmap"
+  echo "==> Installed COLMAP docker shim -> $BIN_DIR/colmap  (image: ${COLMAP_IMAGE:-colmap/colmap:latest})"
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) : ;;
+    *) echo "    NOTE: $BIN_DIR is not on PATH — add this to your shell rc:"
+       echo "          export PATH=\"$BIN_DIR:\$PATH\"" ;;
+  esac
+  echo "    (first colmap call will 'docker pull' the image; or pre-pull it now)"
+elif ! command -v colmap >/dev/null 2>&1; then
+  echo "==> COLMAP not found. Either:"
+  echo "    - install native:  sudo apt-get install -y colmap   /   brew install colmap"
+  echo "    - or use Docker:   COLMAP_DOCKER=1 bash env/setup.sh"
+  exit 1
+fi
+
+# ── ffmpeg (native; uv can't install it) ─────────────────────────────────────
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "==> ffmpeg not found.  Linux: sudo apt-get install -y ffmpeg   macOS: brew install ffmpeg"
   exit 1
 fi
 
