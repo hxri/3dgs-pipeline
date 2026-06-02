@@ -30,9 +30,11 @@ Stages read one config (`configs/default.yaml`) and a `SCENE` name, and write in
 ## Quickstart
 
 ```bash
-# 0. one-time environment setup (conda + gsplat + sam2 + ultralytics)
+# 0. one-time environment setup (uv venv + gsplat + sam2 + ultralytics)
+#    (install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh)
+#    (COLMAP + ffmpeg are native deps — apt/brew install them; setup.sh checks)
 bash env/setup.sh
-conda activate 3dgs-engine
+source .venv/bin/activate            # the stage scripts also auto-activate it
 
 # 1. drop a capture in place
 mkdir -p data/room_a/raw && cp ~/room_a.mp4 data/room_a/raw/

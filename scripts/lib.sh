@@ -7,6 +7,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# auto-activate the uv venv if one exists and we're not already in a venv
+if [[ -z "${VIRTUAL_ENV:-}" && -f "$REPO_ROOT/.venv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.venv/bin/activate"
+fi
+
 CONFIG="${CONFIG:-configs/default.yaml}"
 SCENE="${SCENE:-}"   # empty -> python falls back to $SCENE env or config default
 
